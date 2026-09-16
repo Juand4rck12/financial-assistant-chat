@@ -142,12 +142,11 @@ financial-assistant-chat/
 ## Dev Environment Setup
 
 ```bash
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+# UV tooling (install once)
+pip install uv
 
-# Install dependencies
-pip install -r requirements.txt
+# Create virtual env & install dependencies
+uv sync
 
 # Environment variables
 cp .env.example .env
@@ -160,8 +159,11 @@ alembic upgrade head
 docker run -d -p 6379:6379 redis:alpine
 
 # Start FastAPI server
-uvicorn main:app --reload --port 8000
+uv run uvicorn main:app --reload --port 8000
 ```
+
+> Use `uv add <package>` to add new dependencies — never edit `pyproject.toml` by hand.
+> Use `uv sync` after pulling changes to keep the lockfile in sync.
 
 ---
 
@@ -189,8 +191,11 @@ All tests must pass before merging any branch.
 | `DATABASE_URL` | PostgreSQL connection string |
 | `REDIS_URL` | Redis connection string |
 | `GEMINI_API_KEY` | Google Gemini API key |
-| `WHATSAPP_TOKEN` | WhatsApp API bearer token |
-| `WHATSAPP_VERIFY_TOKEN` | Webhook verification token |
+| `WHATSAPP_TOKEN` | WhatsApp API bearer token (system user or user token) |
+| `WHATSAPP_PHONE_NUMBER_ID` | Business phone number ID |
+| `WHATSAPP_WABA_ID` | WhatsApp Business Account ID |
+| `WHATSAPP_API_VERSION` | Graph API version (default: v22.0) |
+| `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | Webhook challenge verification token |
 | `STT_MODEL` | Speech-to-text model identifier |
 | `ENV` | `development` \| `production` |
 
@@ -200,12 +205,31 @@ All tests must pass before merging any branch.
 
 ## Coding Conventions
 
+### General Rules
+
+- All code: names, docstrings, comments in English.
 - Python type hints are mandatory in all function signatures.
 - Use `Pydantic` models for all data flowing between agents and tools.
-- Agent system prompts live in `agents/<agent_name>.py` as module-level constants, not inline strings.
+- Agent system prompts live as module-level constants, not inline strings.
 - All DB operations are async (`asyncpg` or `SQLAlchemy async`).
-- Log agent decisions and tool calls using structured logging (`structlog` or `logging` with JSON format).
+- Log agent decisions and tool calls using structured logging (`logging` with standard format).
 - Commit messages follow Conventional Commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`.
+
+### Documentation Standards
+
+- Public functions and methods: short Google-style docstring in English, describing purpose, params, and return.
+- Critical logic blocks: inline comments in Spanish for clarity.
+- No over-commenting — the code should be self-documenting where possible.
+- No over-engineering — prefer the simplest correct solution.
+
+### WhatsApp API Client
+
+- Uses `httpx.AsyncClient` for all HTTP calls to Meta's Graph API.
+- Config lives in `core/config.py` via `pydantic-settings.BaseSettings`.
+- Never hardcode tokens, phone numbers, or API versions.
+- Webhook endpoints follow the official Meta collection structure:
+  - `GET /webhook` — challenge verification (`hub.mode`, `hub.verify_token`, `hub.challenge`)
+  - `POST /webhook` — receive incoming messages and status updates
 
 ---
 
@@ -221,7 +245,9 @@ All tests must pass before merging any branch.
 
 ## Open Items (Pending Implementation)
 
-- [ ] Voice/audio handling pipeline (`audio/transcription.py`) — architecture defined, not yet built
+- [ ] Voice/audio handling pipeline (`services/transcription.py`) — architecture defined, not yet built
+- [ ] Connect webhook POST handler to Orchestrator Agent (currently echoes messages)
+- [ ] Implement remaining WhatsApp API methods (templates, flows, interactive messages)
 - [ ] Streamlit dashboard (`dashboard/app.py`) — planned for V2
-- [ ] Full test suite for all agents and tools
+- [ ] Full test suite for all agents, tools, and webhook
 - [ ] Deployment pipeline (Docker + cloud target TBD)
