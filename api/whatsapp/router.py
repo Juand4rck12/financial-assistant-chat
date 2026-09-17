@@ -33,6 +33,10 @@ class TestMessageRequest(BaseModel):
 
 # ── Endpoints del webhook ─────────────────────────────────────────
 
+# Registro de IDs de mensajes procesados para evitar respuestas duplicadas por reintentos de Meta
+_processed_message_ids: set[str] = set()
+
+
 @router.get("", response_class=PlainTextResponse)
 async def verify_webhook(challenge: str = Depends(verify_webhook_token)) -> str:
     """GET /webhook - Verificación del webhook de Meta.
@@ -50,7 +54,7 @@ async def receive_message(
     """POST /webhook - Recibe mensajes de WhatsApp y los enruta al orquestador LangGraph.
     
     1. Extrae remitente y texto del payload de Meta.
-    2. Marca el mensaje como leído.
+    2. Evita procesar mensajes duplicados enviados por reintentos de Meta.
     3. Invoca el grafo multi-agente con thread_id = número del remitente.
     4. Limpia el texto de salida (sin markdown) y lo envía de vuelta al usuario.
     """
@@ -66,6 +70,15 @@ async def receive_message(
             sender_name = contacts[0].get("profile", {}).get("name", "Usuario") if contacts else "Usuario"
 
             for msg in value.get("messages", []):
+                msg_id = msg.get("id")
+                if msg_id and msg_id in _processed_message_ids:
+                    logger.info("Mensaje %s ya fue procesado anteriormente. Omitiendo duplicado.", msg_id)
+                    continue
+                if msg_id:
+                    _processed_message_ids.add(msg_id)
+                    if len(_processed_message_ids) > 1000:
+                        _processed_message_ids.pop()
+
                 webhook_msg = WebhookMessage(
                     from_=msg["from"],
                     id=msg["id"],
@@ -81,7 +94,7 @@ async def receive_message(
                     webhook_msg.text_body or f"(tipo {webhook_msg.type})",
                 )
 
-                # 1. Marcar como leído en WhatsApp
+                # 1. Marcar como leído en WhatsApp en segundo plano para no demorar la respuesta
                 try:
                     await client.mark_as_read(webhook_msg.id)
                 except Exception as err:

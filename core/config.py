@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     mistral_api_key: str = ""
     """Mistral AI API key."""
 
-    mistral_model: str = "mistral-small-latest"
+    mistral_model: str = "open-mistral-7b"
     """Mistral AI model identifier for orchestrator and extraction."""
 
     gemini_api_key: str = ""
