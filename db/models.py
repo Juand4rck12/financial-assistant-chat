@@ -123,7 +123,9 @@ class Account(Base):
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     account_type: Mapped[AccountType] = mapped_column(
-        Enum(AccountType, name="account_type_enum"), default=AccountType.SAVINGS, nullable=False
+        Enum(AccountType, name="account_type_enum", values_callable=lambda x: [e.value for e in x]),
+        default=AccountType.SAVINGS,
+        nullable=False,
     )
     # Precisión estricta de 14 dígitos con 2 decimales para evitar problemas de coma flotante
     current_balance: Mapped[Decimal] = mapped_column(
@@ -161,7 +163,9 @@ class Liability(Base):
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     liability_type: Mapped[LiabilityType] = mapped_column(
-        Enum(LiabilityType, name="liability_type_enum"), default=LiabilityType.CREDIT_CARD, nullable=False
+        Enum(LiabilityType, name="liability_type_enum", values_callable=lambda x: [e.value for e in x]),
+        default=LiabilityType.CREDIT_CARD,
+        nullable=False,
     )
     # Saldo adeudado actual
     current_balance: Mapped[Decimal] = mapped_column(
@@ -193,7 +197,9 @@ class Category(Base):
     )
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     category_type: Mapped[CategoryType] = mapped_column(
-        Enum(CategoryType, name="category_type_enum"), default=CategoryType.EXPENSE, nullable=False
+        Enum(CategoryType, name="category_type_enum", values_callable=lambda x: [e.value for e in x]),
+        default=CategoryType.EXPENSE,
+        nullable=False,
     )
     icon: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -226,7 +232,9 @@ class Expense(Base):
     description: Mapped[str] = mapped_column(String(255), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     expense_type: Mapped[ExpenseType] = mapped_column(
-        Enum(ExpenseType, name="expense_type_enum"), default=ExpenseType.VARIABLE, nullable=False
+        Enum(ExpenseType, name="expense_type_enum", values_callable=lambda x: [e.value for e in x]),
+        default=ExpenseType.VARIABLE,
+        nullable=False,
     )
     statement_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid, ForeignKey("bank_statements.id", ondelete="SET NULL"), nullable=True
@@ -269,7 +277,9 @@ class Income(Base):
     )
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     income_type: Mapped[IncomeType] = mapped_column(
-        Enum(IncomeType, name="income_type_enum"), default=IncomeType.ACTUAL, nullable=False
+        Enum(IncomeType, name="income_type_enum", values_callable=lambda x: [e.value for e in x]),
+        default=IncomeType.ACTUAL,
+        nullable=False,
     )
     statement_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid, ForeignKey("bank_statements.id", ondelete="SET NULL"), nullable=True
@@ -347,7 +357,9 @@ class BankStatement(Base):
         Numeric(precision=14, scale=2), nullable=True
     )
     status: Mapped[StatementStatus] = mapped_column(
-        Enum(StatementStatus, name="statement_status_enum"), default=StatementStatus.PENDING, nullable=False
+        Enum(StatementStatus, name="statement_status_enum", values_callable=lambda x: [e.value for e in x]),
+        default=StatementStatus.PENDING,
+        nullable=False,
     )
     # Almacena transacciones extraídas en staging antes de la confirmación final
     raw_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
