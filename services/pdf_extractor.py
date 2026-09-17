@@ -1,4 +1,5 @@
 import io
+import json
 import logging
 import re
 from datetime import date
@@ -7,6 +8,7 @@ from typing import BinaryIO, List, Optional, Tuple
 
 import pdfplumber
 
+from core.config import settings
 from core.models.schemas import BankStatementPreview, ExtractedTransaction
 from core.tools.calculator_tool import to_decimal, validate_statement_balance
 from core.tools.date_utils import parse_user_date
@@ -33,28 +35,43 @@ class BankStatementExtractor:
                 text = page.extract_text() or ""
                 raw_text += text + "\n"
 
-                # 1. Extracción de tablas tabulares nativas si existen
-                tables = page.extract_tables()
-                for table in tables:
-                    for row in table:
-                        tx = self._parse_table_row(row)
-                        if tx:
-                            extracted_txs.append(tx)
+        # 1. Extracción inteligente mediante Mistral AI (si la API key está configurada)
+        mistral_result = self._extract_with_mistral(raw_text)
+        if mistral_result:
+            extracted_txs, init_bal, fin_bal, p_start, p_end = mistral_result
+            if init_bal is not None:
+                initial_balance = init_bal
+            if fin_bal is not None:
+                final_balance = fin_bal
+            if p_start:
+                period_start = p_start
+            if p_end:
+                period_end = p_end
 
-        # 2. Si no se extrajeron mediante tablas tabulares, intentar extracción por regex de líneas
+        # 2. Si Mistral no está configurado o no extrajo transacciones, usar parseo tabular y regex
         if not extracted_txs:
-            extracted_txs = self._extract_transactions_from_text(raw_text)
+            file_stream.seek(0)
+            with pdfplumber.open(file_stream) as pdf:
+                for page in pdf.pages:
+                    tables = page.extract_tables()
+                    for table in tables:
+                        for row in table:
+                            tx = self._parse_table_row(row)
+                            if tx:
+                                extracted_txs.append(tx)
 
-        # 3. Extraer balances de encabezados / pie de página
-        init_bal, fin_bal, p_start, p_end = self._extract_statement_metadata(raw_text)
-        if init_bal is not None:
-            initial_balance = init_bal
-        if fin_bal is not None:
-            final_balance = fin_bal
-        if p_start:
-            period_start = p_start
-        if p_end:
-            period_end = p_end
+            if not extracted_txs:
+                extracted_txs = self._extract_transactions_from_text(raw_text)
+
+            init_bal, fin_bal, p_start, p_end = self._extract_statement_metadata(raw_text)
+            if init_bal is not None:
+                initial_balance = init_bal
+            if fin_bal is not None:
+                final_balance = fin_bal
+            if p_start:
+                period_start = p_start
+            if p_end:
+                period_end = p_end
 
         # 4. Suma de control matemática estricta (Cero Alucinaciones)
         total_incomes = sum(
@@ -220,5 +237,81 @@ class BankStatementExtractor:
             return "Ingresos"
         return "Varios"
 
+    def _extract_with_mistral(
+        self, text: str
+    ) -> Optional[Tuple[List[ExtractedTransaction], Optional[Decimal], Optional[Decimal], Optional[date], Optional[date]]]:
+        """Use Mistral AI to parse and structure arbitrary bank statement text."""
+        if not settings.mistral_api_key or not text.strip():
+            return None
+        try:
+            from mistralai import Mistral
+            client = Mistral(api_key=settings.mistral_api_key)
+            prompt = (
+                "Eres un experto analista financiero y extractor de extractos bancarios en Colombia.\n"
+                "Analiza el siguiente texto de extracto bancario y extrae de forma rigurosa las transacciones, saldo inicial y saldo final.\n"
+                "Devuelve ÚNICAMENTE un objeto JSON válido con este formato exacto:\n"
+                "{\n"
+                '  "initial_balance": 1000000.00,\n'
+                '  "final_balance": 2875000.00,\n'
+                '  "period_start": "YYYY-MM-DD",\n'
+                '  "period_end": "YYYY-MM-DD",\n'
+                '  "transactions": [\n'
+                '    {\n'
+                '      "date": "YYYY-MM-DD",\n'
+                '      "description": "Nombre de la transacción o comercio",\n'
+                '      "amount": 45000.00,\n'
+                '      "transaction_type": "expense" o "income",\n'
+                '      "suggested_category": "Alimentación"|"Transporte"|"Servicios"|"Ocio"|"Salud"|"Ingresos"|"Otros",\n'
+                '      "reference": null\n'
+                '    }\n'
+                '  ]\n'
+                "}\n"
+                "REGLAS:\n"
+                "1. amount debe ser un número positivo (sin signos negativos ni símbolos $).\n"
+                "2. Asegúrate de incluir todas las transacciones individuales.\n\n"
+                f"Texto del extracto bancario:\n{text[:14000]}"
+            )
+            response = client.chat.complete(
+                model=settings.mistral_model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.1,
+            )
+            content = response.choices[0].message.content
+            data = json.loads(content)
+
+            txs: List[ExtractedTransaction] = []
+            for item in data.get("transactions", []):
+                amt = to_decimal(item.get("amount", 0))
+                if amt > Decimal("0"):
+                    tx_date = parse_user_date(str(item.get("date", "")))
+                    tx_type = str(item.get("transaction_type", "expense")).lower()
+                    if tx_type not in ("expense", "income"):
+                        tx_type = "expense"
+                    txs.append(
+                        ExtractedTransaction(
+                            date=tx_date,
+                            description=str(item.get("description", "Transacción")),
+                            amount=amt,
+                            transaction_type=tx_type,
+                            suggested_category=str(item.get("suggested_category", "Varios")),
+                            reference=item.get("reference"),
+                        )
+                    )
+
+            init_b = to_decimal(data["initial_balance"]) if data.get("initial_balance") is not None else None
+            fin_b = to_decimal(data["final_balance"]) if data.get("final_balance") is not None else None
+            p_start = parse_user_date(str(data["period_start"])) if data.get("period_start") else None
+            p_end = parse_user_date(str(data["period_end"])) if data.get("period_end") else None
+
+            if txs:
+                logger.info("Mistral AI extracted %d transactions from statement.", len(txs))
+                return txs, init_b, fin_b, p_start, p_end
+            return None
+        except Exception as e:
+            logger.warning("Mistral bank statement extraction failed or skipped: %s", e)
+            return None
+
 
 pdf_extractor = BankStatementExtractor()
+
