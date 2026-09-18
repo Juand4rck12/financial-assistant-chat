@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: financial-assistant-backend
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: financial-assistant-db
+          property: connectionString
+      - key: ENV
+        value: production
+      - key: DEFAULT_CURRENCY
+        value: COP
+      - key: MISTRAL_MODEL
+        value: open-mistral-7b
+      - key: WHATSAPP_API_VERSION
+        value: v22.0
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_WABA_ID
+        sync: false
+      - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+
+databases:
+  - name: financial-assistant-db
+    plan: free
+    region: oregon
+    databaseName: finance
+    user: finance_user

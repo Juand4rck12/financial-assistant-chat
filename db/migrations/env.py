@@ -24,10 +24,12 @@ target_metadata = Base.metadata
 
 def get_db_url() -> str:
     """Resolve database URL from settings or config."""
-    db_url = settings.database_url.strip()
+    db_url = settings.database_url.strip() if settings.database_url else ""
     if not db_url:
         db_url = "sqlite+aiosqlite:///./test_financial.db"
-    if db_url.startswith("postgresql://"):
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+asyncpg://"):
         db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     return db_url
 
